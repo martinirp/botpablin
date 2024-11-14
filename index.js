@@ -1,13 +1,15 @@
 // Require the necessary discord.js classes
 const { Client, Events, GatewayIntentBits, Collection } = require('discord.js');
+const { YtDlpPlugin } = require('@distube/yt-dlp');
+const { DisTube } = require('distube');
 
-// Get FFmpeg path from node_modules
-const ffmpeg = require('ffmpeg-static');
+// Get FFmpeg path from node_modules or default to system path
+const ffmpegPath = require('ffmpeg-static') || '/usr/bin/ffmpeg';
 
 // Load dotenv variables
 require('dotenv').config();
 
-const { token } = process.env.DISCORD_TOKEN;
+const token = process.env.DISCORD_TOKEN;
 const isDockerDeploy = process.env.DOCKER_DEPLOY === 'true';
 
 // Create a new client instance
@@ -25,52 +27,27 @@ client.aliases = new Collection();
 client.slashCommands = new Collection();
 
 // Register prefix commands
-const registerCommands = require('./registers/commands-register');
-registerCommands(client);
+require('./registers/commands-register')(client);
 
 // Register slash commands
-const registerSlashCommands = require('./registers/slash-commands-register');
-registerSlashCommands(client);
+require('./registers/slash-commands-register')(client);
 
-// DISTUBE
-const { YtDlpPlugin } = require('@distube/yt-dlp');
-const { DisTube } = require('distube');
-
-if (isDockerDeploy) {
-    client.distube = new DisTube(client, {
-        emitNewSongOnly: true,
-        emitAddSongWhenCreatingQueue: false,
-        emitAddListWhenCreatingQueue: false,
-        savePreviousSongs: true,
-        nsfw: true,
-        plugins: [
-            new YtDlpPlugin(),
-        ],
-    });
-} else {
-    client.distube = new DisTube(client, {
-        emitNewSongOnly: true,
-        emitAddSongWhenCreatingQueue: false,
-        emitAddListWhenCreatingQueue: false,
-        savePreviousSongs: true,
-        nsfw: true,
-        plugins: [
-            new YtDlpPlugin(),
-        ],
-        ffmpeg: {
-            path: '/usr/bin/ffmpeg',
-        },
-    });
-}
+// Configure DisTube
+client.distube = new DisTube(client, {
+    emitNewSongOnly: true,
+    emitAddSongWhenCreatingQueue: false,
+    emitAddListWhenCreatingQueue: false,
+    savePreviousSongs: true,
+    nsfw: true,
+    plugins: [new YtDlpPlugin()],
+    ffmpeg: { path: isDockerDeploy ? undefined : ffmpegPath },
+});
 
 // Handle DisTube errors, including age restriction
 client.distube.on('error', async (channel, error) => {
     try {
         if (error.name === 'YTDLP_ERROR' && error.message.includes('Sign in to confirm your age')) {
-            // Send a message if age confirmation is required
             await channel.send('Este vídeo requer confirmação de idade e não pode ser reproduzido.');
-            
-            // Get the queue and skip the current song if it's active
             const queue = client.distube.getQueue(channel);
             if (queue) await queue.skip();
         } else {
@@ -89,14 +66,13 @@ client.once(Events.ClientReady, (c) => {
 });
 
 // Register the mention command
-const mentionCommand = require('./commands/mention'); // Ajuste o caminho se necessário
+const mentionCommand = require('./commands/mention'); // Ajuste o caminho, se necessário
 
 client.on('messageCreate', async (message) => {
     const prefix = "'";
 
     if (message.author.bot || !message.guild) return;
 
-    // Verifica se o bot foi mencionado
     if (message.mentions.has(client.user)) {
         if (mentionCommand) {
             try {
@@ -106,7 +82,7 @@ client.on('messageCreate', async (message) => {
                 message.channel.send(`Erro ao executar o comando: \`${e.message}\``);
             }
         }
-        return; // Evita que o código abaixo seja executado se o bot for mencionado
+        return;
     }
 
     if (!message.content.startsWith(prefix)) return;
@@ -121,9 +97,7 @@ client.on('messageCreate', async (message) => {
     if (!cmd) return;
 
     if (cmd.inVoiceChannel && !message.member.voice.channel) {
-        return message.channel.send(
-            'Você deve estar em um canal de voz!'
-        );
+        return message.channel.send('Você deve estar em um canal de voz!');
     }
 
     try {
@@ -137,14 +111,10 @@ client.on('messageCreate', async (message) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    const command = interaction.client.slashCommands.get(
-        interaction.commandName
-    );
+    const command = interaction.client.slashCommands.get(interaction.commandName);
 
     if (!command) {
-        console.error(
-            `No command matching ${interaction.commandName} was found.`
-        );
+        console.error(`No command matching ${interaction.commandName} was found.`);
         return;
     }
 
@@ -152,16 +122,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await command.execute(interaction);
     } catch (error) {
         console.error(error);
+        const replyContent = 'There was an error while executing this command!';
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({
-                content: 'There was an error while executing this command!',
-                ephemeral: true,
-            });
+            await interaction.followUp({ content: replyContent, ephemeral: true });
         } else {
-            await interaction.reply({
-                content: 'There was an error while executing this command!',
-                ephemeral: true,
-            });
+            await interaction.reply({ content: replyContent, ephemeral: true });
         }
     }
 });
