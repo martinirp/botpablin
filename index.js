@@ -58,7 +58,7 @@ if (isDockerDeploy) {
             new YtDlpPlugin(),
         ],
         ffmpeg: {
-            path: ffmpeg,
+            path: '/usr/bin/ffmpeg',
         },
     });
 }
